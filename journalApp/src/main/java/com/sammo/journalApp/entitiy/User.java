@@ -1,5 +1,6 @@
 package com.sammo.journalApp.entitiy;
 
+import com.fasterxml.jackson.annotation.JsonBackReference;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import lombok.NonNull;
@@ -26,13 +27,15 @@ public class User {
     private String userName;
 
     @NonNull
+    private String email;
+
+    @NonNull
     private String password;
 
     @DBRef
-    private List<JournalEntry> journalEntries = new ArrayList<>();
+    private List<JournalEntry> journalEntries;
 
     private List<String> roles;
 
     private LocalDateTime date;
-
 }

@@ -5,6 +5,9 @@ import com.sammo.journalApp.Repository.UserRepository;
 import com.sammo.journalApp.entitiy.User;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Component;
 
@@ -21,6 +24,9 @@ public class UserService {
 
     @Autowired
     private PasswordEncoder passwordEncoder;
+
+    @Autowired
+    private MongoTemplate mongoTemplate;
 
     private static final String ROLE_USER = "USER";
     private static final String ROLE_ADMIN = "ADMIN";
@@ -59,6 +65,22 @@ public class UserService {
     public Optional<User> searchUserByUsername(String myUserName){
 
         return userRepository.findByUserName(myUserName);
+    }
+
+    public User getUserByUserName(String userName){
+
+        Query queryForUser = new Query();
+        queryForUser.addCriteria(Criteria.where("userName").is(userName));
+        User user = mongoTemplate.findOne(queryForUser, User.class);
+        return user;
+    }
+
+    public List<User> getUsersByUsernames(List<String> userNames){
+
+        Query query = new Query();
+        query.addCriteria(Criteria.where("userName").in(userNames));
+
+        return mongoTemplate.find(query, User.class);
     }
 
     public void deleteUserById(ObjectId myId){

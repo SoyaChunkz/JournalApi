@@ -1,8 +1,11 @@
 package com.sammo.journalApp.controller;
 
+import com.sammo.journalApp.DTO.JournalEntryRequest;
+import com.sammo.journalApp.DTO.JournalEntryResponse;
 import com.sammo.journalApp.entitiy.JournalEntry;
 import com.sammo.journalApp.service.JournalEntryService;
 import com.sammo.journalApp.service.UserService;
+import com.sammo.journalApp.utils.JournalMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.bson.types.ObjectId;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,7 +28,10 @@ public class JournalEntryControllerWithDb {
     @Autowired
     private UserService userService;
 
-    // Retrieve all journal entries by userName
+    @Autowired
+    private JournalMapper journalMapper;
+
+    // Retrieve all journal entries by userName✅
     @GetMapping()
     public ResponseEntity<?> getAllJournalEntriesByUserName(){
 
@@ -40,7 +46,7 @@ public class JournalEntryControllerWithDb {
 
         try {
             log.info("Fetching all journal entries for: '{}'", myUserName);
-            List<JournalEntry> allEntries = journalEntryService.getAllJournalEntriesByUserName(myUserName);
+            List<JournalEntryResponse> allEntries = journalEntryService.getAllJournalEntriesByUserName(myUserName);
 
             if( allEntries != null ){
                 log.info("Successfully fetched '{}' entries for: '{}'", allEntries.size(), myUserName);
@@ -56,7 +62,7 @@ public class JournalEntryControllerWithDb {
         }
     }
 
-    // Retrieve a journal entry by ID
+    // Retrieve a journal entry by ID✅
     @GetMapping("/id/{myId}")
     public ResponseEntity<?> getJournalEntryById(@PathVariable ObjectId myId){
 
@@ -71,20 +77,21 @@ public class JournalEntryControllerWithDb {
 
         try {
             log.info("Fetching journal entry with ID '{}' for user: '{}'", myId, myUserName);
-            Optional<JournalEntry> journalEntryOpt = journalEntryService.getJournalEntryById(myId);
+            JournalEntryResponse journalEntryResponse = journalEntryService.getJournalEntryById(myId);
 
-            if( journalEntryOpt.isEmpty() ){
+            if( !journalEntryService.isUserCollaborator(myId, myUserName) ){
+                log.info("Unauthorized access attempt detected by: '{}'", myUserName);
+                return new ResponseEntity<>("Unauthorised", HttpStatus.FORBIDDEN);
+            }
+            else if( journalEntryResponse == null ){
                 log.info("No journal entry found with ID: {}", myId);
                 return new ResponseEntity<>("Journal Entry Not Found", HttpStatus.NOT_FOUND);
             }
 
-            else if( !journalEntryService.isJournalAndUserNameValid(myId, myUserName) ){
-                log.info("Unauthorized access attempt detected by: '{}'", myUserName);
-                return new ResponseEntity<>("Unauthorised", HttpStatus.FORBIDDEN);
+            else {
+                log.info("Successfully fetched journal entry with ID '{}' for user: '{}'", myId, myUserName);
+                return new ResponseEntity<>(journalEntryResponse, HttpStatus.OK);
             }
-
-            log.info("Successfully fetched journal entry with ID '{}' for user: '{}'", myId, myUserName);
-            return new ResponseEntity<>(journalEntryOpt.get(), HttpStatus.OK);
 
         } catch (IllegalArgumentException e) {
             log.error("Invalid ID format: '{}'", myId, e);
@@ -96,7 +103,7 @@ public class JournalEntryControllerWithDb {
         }
     }
 
-    // Search journal entry by title
+    // Search journal entry by title✅
     @GetMapping("/search")
     public ResponseEntity<?> searchJournalEntry(@RequestParam String title){
 
@@ -112,11 +119,11 @@ public class JournalEntryControllerWithDb {
         try {
             log.info("User '{}' is searching for journal entry with title: '{}'", myUserName, title);
 
-            JournalEntry journalEntry = journalEntryService.searchJournalEntryByTitle(title, myUserName);
+            List<JournalEntryResponse> journalEntriesResponse = journalEntryService.searchJournalEntriesByTitle(title, myUserName);
 
-            if( journalEntry != null ) {
-                log.info("Journal entry found for user '{}': {}", myUserName, journalEntry);
-                return new ResponseEntity<>(journalEntry, HttpStatus.OK);
+            if( journalEntriesResponse != null ) {
+                log.info("Journal entries found for user '{}': {}", myUserName, journalEntriesResponse);
+                return new ResponseEntity<>(journalEntriesResponse, HttpStatus.OK);
             }
             else{
                 log.info("No journal entry found with title '{}' for user '{}'", title, myUserName);
@@ -129,9 +136,11 @@ public class JournalEntryControllerWithDb {
 
     }
 
-    // Create a new journal entry
+    // Create a new journal entry✅
     @PostMapping
-    public ResponseEntity<?> createJournalEntry(@RequestBody JournalEntry myEntry){
+    public ResponseEntity<?> createJournalEntry(@RequestBody JournalEntryRequest request){
+
+        log.info("Received request: {}", request);
 
         Authentication authenticatedUser = SecurityContextHolder.getContext().getAuthentication();
 
@@ -140,27 +149,37 @@ public class JournalEntryControllerWithDb {
             return new ResponseEntity<>("Unauthorized", HttpStatus.UNAUTHORIZED);
         }
 
-        String myUserName = authenticatedUser.getName();
+        String creatorUserName = authenticatedUser.getName();
 
         try {
-            log.info("User '{}' is attempting to create a new journal entry with title: '{}'", myUserName, myEntry.getTitle());
+            log.info("User '{}' is attempting to create a new journal entry with title: '{}'", creatorUserName, request.getTitle());
 
-            boolean isSaved = journalEntryService.saveJournalEntry(myEntry, myUserName);
+            if( Boolean.TRUE.equals(request.getIsCollaborative()) ){
+
+                if( request.getCollaborators() == null || request.getCollaborators().isEmpty() ){
+                    log.warn("Collaborative entry requires at least one collaborator.");
+                    return new ResponseEntity<>("Collaborators are required for a collaborative journal entry.", HttpStatus.BAD_REQUEST);
+                }
+            }
+
+            JournalEntry journalEntry = journalMapper.mapRequestToJournalEntry(request);
+
+            boolean isSaved = journalEntryService.saveNewJournalEntry(journalEntry, creatorUserName);
 
             if (isSaved) {
-                log.info("Journal entry '{}' created successfully for user '{}'.", myEntry.getTitle(), myUserName);
+                log.info("Journal entry '{}' created successfully for user '{}'.", request.getTitle(), creatorUserName);
                 return new ResponseEntity<>("Journal Entry Created Successfully", HttpStatus.CREATED);
             } else {
-                log.warn("Failed to create journal entry for user '{}': User not found.", myUserName);
+                log.warn("Failed to create journal entry for user '{}': User not found.", creatorUserName);
                 return new ResponseEntity<>("User Not Found", HttpStatus.NOT_FOUND);
             }
         } catch (Exception e) {
-                log.error("An error occurred while creating a journal entry for user '{}': {}", myUserName, e.getMessage(), e);
+                log.error("An error occurred while creating a journal entry for user '{}': {}", creatorUserName, e.getMessage(), e);
                 return new ResponseEntity<>("Something went wrong", HttpStatus.BAD_REQUEST);
             }
     }
 
-    // Delete a journal entry by ID
+    // Delete a journal entry by ID✅
     @DeleteMapping("/id/{myId}")
     public ResponseEntity<?> deleteJournalEntryById(@PathVariable ObjectId myId) {
 
@@ -176,7 +195,7 @@ public class JournalEntryControllerWithDb {
         try {
             log.info("User '{}' is attempting to delete journal entry with ID: {}", myUserName, myId);
 
-            boolean isValid = journalEntryService.isJournalAndUserNameValid(myId, myUserName);
+            boolean isValid = journalEntryService.isCollaboratorTheOwner(myId, myUserName);
 
             if( isValid ){
                 boolean isDeleted = journalEntryService.deleteJournalEntryById(myId, myUserName);
@@ -199,8 +218,7 @@ public class JournalEntryControllerWithDb {
 
     }
 
-
-    // Update a journal entry by ID
+    //Update a journal entry by ID
     @PutMapping("/id/{myId}")
     public ResponseEntity<?> updateJournalEntryById(@PathVariable ObjectId myId, @RequestBody JournalEntry myEntry){
 
@@ -216,20 +234,20 @@ public class JournalEntryControllerWithDb {
         try {
             log.info("User '{}' is attempting to update journal entry with ID: {}", myUserName, myId);
 
-            boolean isValid = journalEntryService.isJournalAndUserNameValid(myId, myUserName);
-            Optional<JournalEntry> oldEntryOpt = journalEntryService.getJournalEntryById(myId);
+            JournalEntryResponse oldEntry = journalEntryService.getJournalEntryById(myId);
+            boolean isValid = journalEntryService.isUserCollaborator(myId, myUserName);
 
-            if( isValid && oldEntryOpt.isPresent() && userService.searchUserByUsername(myUserName).isPresent() ){
+            if( isValid && oldEntry != null && userService.searchUserByUsername(myUserName).isPresent() ){
 
-                JournalEntry oldEntry = oldEntryOpt.get();
+                boolean isUpdated = journalEntryService.updateJournalEntry(myId, oldEntry, myEntry);
 
-                oldEntry.setTitle( !myEntry.getTitle().isEmpty() ? myEntry.getTitle() : oldEntry.getTitle());
-                oldEntry.setContent( ( myEntry.getContent() != null && !myEntry.getContent().isEmpty()) ? myEntry.getContent() : oldEntry.getTitle() );
-
-                journalEntryService.saveJournalEntry(oldEntry);
-
-                log.info("Journal entry with ID '{}' updated successfully by user '{}'.", myId, myUserName);
-                return new ResponseEntity<>("Journal Entry Updated Successfully", HttpStatus.OK);
+                if ( isUpdated ){
+                    log.info("Journal entry with ID '{}' updated successfully by user '{}'.", myId, myUserName);
+                    return new ResponseEntity<>("Journal Entry Updated Successfully", HttpStatus.OK);
+                } else {
+                    log.warn("Failed to update journal entry with ID '{}'.", myId);
+                    return new ResponseEntity<>("Update Failed", HttpStatus.INTERNAL_SERVER_ERROR);
+                }
             } else if( !isValid ){
                 log.warn("Unauthorized attempt to update journal entry with ID '{}' by user '{}'.", myId, myUserName);
                 return new ResponseEntity<>("Unauthorized", HttpStatus.FORBIDDEN);
