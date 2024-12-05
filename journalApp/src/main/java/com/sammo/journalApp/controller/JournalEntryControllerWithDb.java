@@ -157,8 +157,7 @@ public class JournalEntryControllerWithDb {
             if( Boolean.TRUE.equals(request.getIsCollaborative()) ){
 
                 if( request.getCollaborators() == null || request.getCollaborators().isEmpty() ){
-                    log.warn("Collaborative entry requires at least one collaborator.");
-                    return new ResponseEntity<>("Collaborators are required for a collaborative journal entry.", HttpStatus.BAD_REQUEST);
+                    log.warn("Crating Collaborative entry with one collaborator (Owner).");
                 }
             }
 
@@ -218,9 +217,9 @@ public class JournalEntryControllerWithDb {
 
     }
 
-    //Update a journal entry by ID
+    //Update a journal entry by ID✅
     @PutMapping("/id/{myId}")
-    public ResponseEntity<?> updateJournalEntryById(@PathVariable ObjectId myId, @RequestBody JournalEntry myEntry){
+    public ResponseEntity<?> updateJournalEntryById(@PathVariable ObjectId myId, @RequestBody JournalEntryRequest request){
 
         Authentication authenticatedUser = SecurityContextHolder.getContext().getAuthentication();
 
@@ -239,7 +238,8 @@ public class JournalEntryControllerWithDb {
 
             if( isValid && oldEntry != null && userService.searchUserByUsername(myUserName).isPresent() ){
 
-                boolean isUpdated = journalEntryService.updateJournalEntry(myId, oldEntry, myEntry);
+                JournalEntry journalEntry = journalMapper.mapRequestToJournalEntry(request);
+                boolean isUpdated = journalEntryService.updateJournalEntry(myId, oldEntry, journalEntry);
 
                 if ( isUpdated ){
                     log.info("Journal entry with ID '{}' updated successfully by user '{}'.", myId, myUserName);

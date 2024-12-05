@@ -55,24 +55,19 @@ public class JournalEntryService {
             collaborators.add(creatorUserName);
 
             // 4. initialize permissions map and set the creator's OWNER permission
-            HashMap<String, String> permissions = myEntry.getPermissions();
-            if( permissions == null ){
-                permissions = new HashMap<>();
-            }
+            HashMap<String, String> permissions = new HashMap<>(myEntry.getPermissions());
             permissions.put(creatorUserName, "OWNER");
 
             // 5. if collaborative, validate collaborators
             if( Boolean.TRUE.equals(myEntry.getIsCollaborative()) ){
 
                 // retrieve all collaborators' userNames
-                List<String> userNames = new ArrayList<>(myEntry.getCollaborators());
+                List<String> userNamesOfAdditionalCollaborators = new ArrayList<>(myEntry.getCollaborators());
 
                 // get the collaborators from DB
-                List<User> additionalCollaborators = userService.getUsersByUsernames(userNames);
-
-                if( additionalCollaborators.isEmpty() ){
-                    throw new IllegalArgumentException("No valid collaborators provided.");
-                }
+                List<User> additionalCollaborators = (!userNamesOfAdditionalCollaborators.isEmpty()) ?
+                        userService.getUsersByUsernames(userNamesOfAdditionalCollaborators) :
+                        new ArrayList<>();
 
                 // add the collaborators to the list
                 for( User collaborator : additionalCollaborators ){
@@ -83,6 +78,30 @@ public class JournalEntryService {
                     // set default READ permission for all additional collaborators if not already set
                     permissions.putIfAbsent(collaborator.getUserName(), "READ");
                 }
+
+                for( Map.Entry<String, String> entry : permissions.entrySet() ){
+
+                    if( !entry.getKey().equals(creatorUserName) && entry.getValue().equals("OWNER") ){
+                        permissions.put(entry.getKey(), "READ");
+                    }
+                }
+                List<User> users = userService.getUsersByUsernames(new ArrayList<>(permissions.keySet()));
+
+                Set<String> existingUsernames = new HashSet<>();
+                for (User user : users) {
+                    existingUsernames.add(user.getUserName());
+                }
+
+                for( String collaborator : permissions.keySet() ){
+                    if( !collaborators.contains(collaborator) ){
+                        if( existingUsernames.contains(collaborator) ){
+                            collaborators.add(collaborator);
+                        } else {
+                            throw new IllegalArgumentException("Collaborator Not Found. " + collaborator);
+                        }
+                    }
+                }
+
             }
 
             // 4. set the collaborators and permissions
@@ -133,10 +152,11 @@ public class JournalEntryService {
 
         List<String> newCollaborators = new ArrayList<>();
         HashMap<String, String> newPermissions = new HashMap<>();
-
+        String creator = "";
         for( Map.Entry<String, String> entry : oldEntry.getPermissions().entrySet() ){
 
             if( entry.getValue().equals("OWNER") ){
+                creator = entry.getKey();
                 newCollaborators.add(entry.getKey());
                 newPermissions.put(entry.getKey(), entry.getValue());
             }
@@ -144,8 +164,54 @@ public class JournalEntryService {
 
         if( myEntry.getIsCollaborative() ){
 
-            newCollaborators.addAll(myEntry.getCollaborators());
-            newPermissions.putAll(myEntry.getPermissions());
+            for( Map.Entry<String, String> entry : myEntry.getPermissions().entrySet() ){
+                if( entry.getKey().equals(creator) ){
+                    continue;
+                }
+                if( entry.getValue().equals("OWNER") ){
+                    newCollaborators.add(entry.getKey());
+                    String permission = oldEntry.getPermissions().containsKey(entry.getKey()) ? oldEntry.getPermissions().get(entry.getKey()) : "READ";
+                    newPermissions.put(entry.getKey(), permission );
+                } else {
+                    newCollaborators.add(entry.getKey());
+                    newPermissions.put(entry.getKey(), entry.getValue());
+                }
+            }
+
+            for( String collaborator : myEntry.getCollaborators() ){
+
+                if( !(newPermissions.containsKey(collaborator)) ){
+                    newCollaborators.add(collaborator);
+                    newPermissions.put(collaborator, "READ");
+                }
+            }
+
+            List<User> validCollaborators = userService.getUsersByUsernames(newCollaborators);
+            List<String> invalidCollaborators = new ArrayList<>();
+
+            for( String collaborator : newCollaborators ){
+                boolean isValid = false;
+                for( User validCollaborator : validCollaborators ){
+                    if( validCollaborator.getUserName().equals(collaborator) ){
+                        isValid = true;
+                        break;
+                    }
+                }
+
+                if( !isValid ){
+                    invalidCollaborators.add(collaborator);
+                }
+            }
+
+            newCollaborators.removeAll(invalidCollaborators);
+
+            for( String invalidCollaborator : invalidCollaborators ){
+                newPermissions.remove(invalidCollaborator);
+            }
+
+            if( !invalidCollaborators.isEmpty() ){
+                System.out.println("The following collaborators were not added because they don't exist: " + invalidCollaborators);
+            }
 
             oldEntry.setCollaborators( !myEntry.getCollaborators().isEmpty() ? newCollaborators : oldEntry.getCollaborators() );
             oldEntry.setPermissions( !myEntry.getPermissions().isEmpty() ? newPermissions : oldEntry.getPermissions() );
