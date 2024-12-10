@@ -2,6 +2,7 @@ package com.sammo.journalApp.service;
 
 import com.mongodb.client.result.UpdateResult;
 import com.sammo.journalApp.DTO.JournalEntryResponse;
+import com.sammo.journalApp.DTO.MakeJournalCollaborativeRequest;
 import com.sammo.journalApp.Repository.JournalEntryRepository;
 import com.sammo.journalApp.entitiy.JournalEntry;
 import com.sammo.journalApp.entitiy.User;
@@ -115,6 +116,7 @@ public class JournalEntryService {
             JournalEntry savedEntry = journalEntryRepository.save(myEntry);
 
             // 7. link the creator with the journal entry
+            System.out.println(creator.getJournalEntries());
             creator.getJournalEntries().add(savedEntry);
             userService.saveUser(creator);
 
@@ -152,6 +154,7 @@ public class JournalEntryService {
 
         List<String> newCollaborators = new ArrayList<>();
         HashMap<String, String> newPermissions = new HashMap<>();
+
         String creator = "";
         for( Map.Entry<String, String> entry : oldEntry.getPermissions().entrySet() ){
 
@@ -216,6 +219,80 @@ public class JournalEntryService {
             oldEntry.setCollaborators( !myEntry.getCollaborators().isEmpty() ? newCollaborators : oldEntry.getCollaborators() );
             oldEntry.setPermissions( !myEntry.getPermissions().isEmpty() ? newPermissions : oldEntry.getPermissions() );
         }
+
+        UpdateResult updateResult = saveExistingJournalEntry(Id, oldEntry);
+        if( updateResult.getMatchedCount() == 0 ){
+            throw new IllegalArgumentException("No journal entry found with ID: " + Id);
+        }
+        return true;
+    }
+
+    public boolean makeJournalEntryCollaborative(ObjectId Id, JournalEntryResponse oldEntry, MakeJournalCollaborativeRequest request){
+
+        oldEntry.setIsCollaborative(true);
+        List<String> newCollaborators = new ArrayList<>();
+        HashMap<String, String> newPermissions = new HashMap<>();
+
+        String creator = "";
+        for( Map.Entry<String, String> entry : oldEntry.getPermissions().entrySet() ){
+
+            if( entry.getValue().equals("OWNER") ){
+                creator = entry.getKey();
+                newCollaborators.add(entry.getKey());
+                newPermissions.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        for( Map.Entry<String, String> entry : request.getPermissions().entrySet() ){
+            if( entry.getKey().equals(creator) ){
+                continue;
+            }
+            if( entry.getValue().equals("OWNER") ){
+                newCollaborators.add(entry.getKey());
+                newPermissions.put(entry.getKey(), "READ" );
+            } else {
+                newCollaborators.add(entry.getKey());
+                newPermissions.put(entry.getKey(), entry.getValue());
+            }
+        }
+
+        for( String collaborator : request.getCollaborators() ){
+
+            if( !(newPermissions.containsKey(collaborator)) ){
+                newCollaborators.add(collaborator);
+                newPermissions.put(collaborator, "READ");
+            }
+        }
+
+        List<User> validCollaborators = userService.getUsersByUsernames(newCollaborators);
+        List<String> invalidCollaborators = new ArrayList<>();
+
+        for( String collaborator : newCollaborators ){
+            boolean isValid = false;
+            for( User validCollaborator : validCollaborators ){
+                if( validCollaborator.getUserName().equals(collaborator) ){
+                    isValid = true;
+                    break;
+                }
+            }
+
+            if( !isValid ){
+                invalidCollaborators.add(collaborator);
+            }
+        }
+
+        newCollaborators.removeAll(invalidCollaborators);
+
+        for( String invalidCollaborator : invalidCollaborators ){
+            newPermissions.remove(invalidCollaborator);
+        }
+
+        if( !invalidCollaborators.isEmpty() ){
+            System.out.println("The following collaborators were not added because they don't exist: " + invalidCollaborators);
+        }
+
+        oldEntry.setCollaborators( !request.getCollaborators().isEmpty() ? newCollaborators : oldEntry.getCollaborators() );
+        oldEntry.setPermissions( !request.getPermissions().isEmpty() ? newPermissions : oldEntry.getPermissions() );
 
         UpdateResult updateResult = saveExistingJournalEntry(Id, oldEntry);
         if( updateResult.getMatchedCount() == 0 ){
@@ -337,32 +414,33 @@ public class JournalEntryService {
 
         JournalEntryResponse journalEntryResponse = getJournalEntryById(myId);
 
-        if( journalEntryResponse != null ){
+        return journalEntryResponse != null && journalEntryResponse.getCollaborators().contains(myUserName);
+    }
 
-            for( String collaborator : journalEntryResponse.getCollaborators() ){
+    public boolean isUserCollaboratorWithValidPermission(ObjectId myId, String myUserName){
 
-                if( collaborator.equals(myUserName) )
-                    return true;
-            }
-        }
+        JournalEntryResponse journalEntryResponse = getJournalEntryById(myId);
 
-        return false;
+        if( journalEntryResponse == null ) return false;
+
+        if( !journalEntryResponse.getCollaborators().contains(myUserName) ) return false;
+
+        String permission = journalEntryResponse.getPermissions().get(myUserName);
+
+        return permission != null && (permission.equals("OWNER") || permission.equals("WRITE"));
     }
 
     public boolean isCollaboratorTheOwner(ObjectId myId, String myUserName){
 
         JournalEntryResponse journalEntryResponse = getJournalEntryById(myId);
 
-        if( journalEntryResponse != null ){
+        if( journalEntryResponse == null ) return false;
 
-            for( Map.Entry<String, String> entry : journalEntryResponse.getPermissions().entrySet() ){
+        if( !journalEntryResponse.getCollaborators().contains(myUserName) ) return false;
 
-                if( entry.getKey().equals(myUserName) && entry.getValue().equals("OWNER") )
-                    return true;
-            }
-        }
+        String permission = journalEntryResponse.getPermissions().get(myUserName);
 
-        return false;
+        return permission != null && permission.equals("OWNER");
     }
 
 }

@@ -2,6 +2,7 @@ package com.sammo.journalApp.controller;
 
 import com.sammo.journalApp.DTO.JournalEntryRequest;
 import com.sammo.journalApp.DTO.JournalEntryResponse;
+import com.sammo.journalApp.DTO.MakeJournalCollaborativeRequest;
 import com.sammo.journalApp.entitiy.JournalEntry;
 import com.sammo.journalApp.service.JournalEntryService;
 import com.sammo.journalApp.service.UserService;
@@ -217,8 +218,8 @@ public class JournalEntryControllerWithDb {
 
     }
 
-    //Update a journal entry by ID✅
-    @PutMapping("/id/{myId}")
+    // Update a journal entry by ID✅
+    @PutMapping("update/id/{myId}")
     public ResponseEntity<?> updateJournalEntryById(@PathVariable ObjectId myId, @RequestBody JournalEntryRequest request){
 
         Authentication authenticatedUser = SecurityContextHolder.getContext().getAuthentication();
@@ -234,12 +235,58 @@ public class JournalEntryControllerWithDb {
             log.info("User '{}' is attempting to update journal entry with ID: {}", myUserName, myId);
 
             JournalEntryResponse oldEntry = journalEntryService.getJournalEntryById(myId);
-            boolean isValid = journalEntryService.isUserCollaborator(myId, myUserName);
+            boolean isValid = journalEntryService.isUserCollaboratorWithValidPermission(myId, myUserName);
 
             if( isValid && oldEntry != null && userService.searchUserByUsername(myUserName).isPresent() ){
 
                 JournalEntry journalEntry = journalMapper.mapRequestToJournalEntry(request);
                 boolean isUpdated = journalEntryService.updateJournalEntry(myId, oldEntry, journalEntry);
+
+                if ( isUpdated ){
+                    log.info("Journal entry with ID '{}' updated successfully by user '{}'.", myId, myUserName);
+                    return new ResponseEntity<>("Journal Entry Updated Successfully", HttpStatus.OK);
+                } else {
+                    log.warn("Failed to update journal entry with ID '{}'.", myId);
+                    return new ResponseEntity<>("Update Failed", HttpStatus.INTERNAL_SERVER_ERROR);
+                }
+            } else if( !isValid ){
+                log.warn("Unauthorized attempt to update journal entry with ID '{}' by user '{}'.", myId, myUserName);
+                return new ResponseEntity<>("Unauthorized", HttpStatus.FORBIDDEN);
+            } else if( userService.searchUserByUsername(myUserName).isEmpty() ){
+                log.warn("User '{}' not found in the database.", myUserName);
+                return new ResponseEntity<>("User Not Found", HttpStatus.NOT_FOUND);
+            } else {
+                log.warn("Journal entry with ID '{}' not found for user '{}'.", myId, myUserName);
+                return new ResponseEntity<>("Journal Entry Not Found", HttpStatus.NOT_FOUND);
+            }
+        } catch (Exception e) {
+            log.error("An error occurred while updating journal entry with ID '{}' for user '{}': {}", myId, myUserName, e.getMessage(), e);
+            return new ResponseEntity<>("Internal Server Error", HttpStatus.INTERNAL_SERVER_ERROR);
+        }
+    }
+
+    // Make a journal entry collaborative (❌ make DTO for this request)
+    @PutMapping("make-collaborative/id/{myId}")
+    public ResponseEntity<?> makeJournalEntryCollaborative(@PathVariable ObjectId myId, @RequestBody MakeJournalCollaborativeRequest request){
+
+        Authentication authenticatedUser = SecurityContextHolder.getContext().getAuthentication();
+
+        if( authenticatedUser == null || authenticatedUser.getName() == null ){
+            log.warn("Unauthorized access attempt detected.");
+            return new ResponseEntity<>("Unauthorized", HttpStatus.UNAUTHORIZED);
+        }
+
+        String myUserName = authenticatedUser.getName();
+
+        try {
+            log.info("User '{}' is attempting to update journal entry with ID: {}", myUserName, myId);
+
+            JournalEntryResponse oldEntry = journalEntryService.getJournalEntryById(myId);
+            boolean isValid = journalEntryService.isCollaboratorTheOwner(myId, myUserName);
+
+            if( isValid && oldEntry != null && userService.searchUserByUsername(myUserName).isPresent() ){
+
+                boolean isUpdated = journalEntryService.makeJournalEntryCollaborative(myId, oldEntry, request);
 
                 if ( isUpdated ){
                     log.info("Journal entry with ID '{}' updated successfully by user '{}'.", myId, myUserName);

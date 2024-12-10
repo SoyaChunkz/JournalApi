@@ -2,6 +2,7 @@ package com.sammo.journalApp.utils;
 
 import com.sammo.journalApp.DTO.JournalEntryRequest;
 import com.sammo.journalApp.DTO.JournalEntryResponse;
+import com.sammo.journalApp.DTO.MakeJournalCollaborativeRequest;
 import com.sammo.journalApp.entitiy.JournalEntry;
 import com.sammo.journalApp.service.UserService;
 import org.springframework.beans.factory.annotation.Autowired;
