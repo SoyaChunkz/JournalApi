@@ -32,8 +32,13 @@ public class UserService {
     private static final String ROLE_USER = "USER";
     private static final String ROLE_ADMIN = "ADMIN";
 
-    public void saveNewUser(User myUser, String role){
+    public boolean saveNewUser(User myUser, String role){
 
+        Optional<User> userOpt = userRepository.findByUserName(myUser.getUserName());
+        if( userOpt.isPresent() ){
+//            throw new IllegalArgumentException("Username already exists: " + userOpt.get().getUserName());
+            return false;
+        }
         myUser.setDate(LocalDateTime.now());
         myUser.setPassword(passwordEncoder.encode(myUser.getPassword()));
 
@@ -46,6 +51,8 @@ public class UserService {
         else
             throw new IllegalArgumentException("Invalid Role: " + role);
         userRepository.save(myUser);
+
+        return true;
     }
 
     public void saveUser(User myUser){

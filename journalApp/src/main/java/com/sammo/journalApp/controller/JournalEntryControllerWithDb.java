@@ -265,7 +265,7 @@ public class JournalEntryControllerWithDb {
         }
     }
 
-    // Make a journal entry collaborative (❌ make DTO for this request)
+    // Make a journal entry collaborative✅
     @PutMapping("make-collaborative/id/{myId}")
     public ResponseEntity<?> makeJournalEntryCollaborative(@PathVariable ObjectId myId, @RequestBody MakeJournalCollaborativeRequest request){
 

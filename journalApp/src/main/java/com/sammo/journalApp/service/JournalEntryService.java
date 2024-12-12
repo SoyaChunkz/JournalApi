@@ -151,6 +151,7 @@ public class JournalEntryService {
 
         oldEntry.setTitle( !myEntry.getTitle().isEmpty() ? myEntry.getTitle() : oldEntry.getTitle());
         oldEntry.setContent( ( myEntry.getContent() != null && !myEntry.getContent().isEmpty()) ? myEntry.getContent() : oldEntry.getContent() );
+        oldEntry.setIsCollaborative(myEntry.getIsCollaborative());
 
         List<String> newCollaborators = new ArrayList<>();
         HashMap<String, String> newPermissions = new HashMap<>();
@@ -218,6 +219,28 @@ public class JournalEntryService {
 
             oldEntry.setCollaborators( !myEntry.getCollaborators().isEmpty() ? newCollaborators : oldEntry.getCollaborators() );
             oldEntry.setPermissions( !myEntry.getPermissions().isEmpty() ? newPermissions : oldEntry.getPermissions() );
+        }
+        else {
+            // ❌ making journal non-collaborative is making collaborators and permissions null
+            List<String> ownerCollaborators = new ArrayList<>();
+            HashMap<String, String> ownerPermissions = new HashMap<>();
+
+            if (oldEntry.getPermissions() == null) {
+                oldEntry.setPermissions(new HashMap<>());
+            }
+            if (oldEntry.getCollaborators() == null) {
+                oldEntry.setCollaborators(new ArrayList<>());
+            }
+
+            for( Map.Entry<String, String> entry : oldEntry.getPermissions().entrySet() ){
+                if( entry.getValue().equals("OWNER") ){
+                    ownerCollaborators.add(entry.getKey());
+                    ownerPermissions.put(entry.getKey(), entry.getValue());
+                }
+            }
+
+            oldEntry.setCollaborators(ownerCollaborators);
+            oldEntry.setPermissions(ownerPermissions);
         }
 
         UpdateResult updateResult = saveExistingJournalEntry(Id, oldEntry);
