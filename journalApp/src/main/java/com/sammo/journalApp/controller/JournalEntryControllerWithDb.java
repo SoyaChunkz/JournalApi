@@ -1,10 +1,12 @@
 package com.sammo.journalApp.controller;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.sammo.journalApp.DTO.JournalEntryRequest;
 import com.sammo.journalApp.DTO.JournalEntryResponse;
 import com.sammo.journalApp.DTO.MakeJournalCollaborativeRequest;
 import com.sammo.journalApp.entitiy.JournalEntry;
 import com.sammo.journalApp.service.JournalEntryService;
+import com.sammo.journalApp.service.RedisService;
 import com.sammo.journalApp.service.UserService;
 import com.sammo.journalApp.utils.JournalMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -32,6 +34,9 @@ public class JournalEntryControllerWithDb {
     @Autowired
     private JournalMapper journalMapper;
 
+    @Autowired
+    private RedisService redisService;
+
     // Retrieve all journal entries by userName✅
     @GetMapping()
     public ResponseEntity<?> getAllJournalEntriesByUserName(){
@@ -46,16 +51,27 @@ public class JournalEntryControllerWithDb {
         String myUserName = authenticatedUser.getName();
 
         try {
-            log.info("Fetching all journal entries for: '{}'", myUserName);
-            List<JournalEntryResponse> allEntries = journalEntryService.getAllJournalEntriesByUserName(myUserName);
+            TypeReference<List<JournalEntryResponse>> typeRefLJE = new TypeReference<List<JournalEntryResponse>>() {};
+            List<JournalEntryResponse> allEntriesCache = redisService.get("journalEntries:" + myUserName, typeRefLJE);
 
-            if( allEntries != null ){
-                log.info("Successfully fetched '{}' entries for: '{}'", allEntries.size(), myUserName);
-                return new ResponseEntity<>(allEntries, HttpStatus.OK);
-            }
-            else{
-                log.info("No entries for '{}' in database.", myUserName);
-                return new ResponseEntity<>("Journal is Empty", HttpStatus.NO_CONTENT);
+            // in case of cache miss
+            if( allEntriesCache == null || allEntriesCache.isEmpty()  ){
+                log.info("Cache miss for: '{}'. Fetching from database...", myUserName);
+
+                List<JournalEntryResponse> allEntries = journalEntryService.getAllJournalEntriesByUserName(myUserName);
+
+                if( allEntries != null ){
+                    redisService.set("journalEntries:" + myUserName, allEntries, 60L);
+                    log.info("Successfully fetched '{}' entries for: '{}'", allEntries.size(), myUserName);
+                    return new ResponseEntity<>(allEntries, HttpStatus.OK);
+                } else{
+                    log.info("No entries for '{}' in database.", myUserName);
+                    return new ResponseEntity<>("Journal is Empty", HttpStatus.NO_CONTENT);
+                }
+            } else {
+                // in case of hit
+                log.info("Cache hit for: '{}'. Returning cached entries.", myUserName);
+                return new ResponseEntity<>(allEntriesCache, HttpStatus.OK);
             }
         } catch (Exception e) {
             log.error("An error occurred while fetching journal entries for '{}': {}", myUserName, e.getMessage(), e);
@@ -77,22 +93,63 @@ public class JournalEntryControllerWithDb {
         String myUserName = authenticatedUser.getName();
 
         try {
-            log.info("Fetching journal entry with ID '{}' for user: '{}'", myId, myUserName);
-            JournalEntryResponse journalEntryResponse = journalEntryService.getJournalEntryById(myId);
-
             if( !journalEntryService.isUserCollaborator(myId, myUserName) ){
-                log.info("Unauthorized access attempt detected by: '{}'", myUserName);
+                log.warn("Unauthorized access attempt detected by: '{}'", myUserName);
                 return new ResponseEntity<>("Unauthorised", HttpStatus.FORBIDDEN);
             }
-            else if( journalEntryResponse == null ){
+
+            // check if the specific entry is cached (hit)
+            TypeReference<JournalEntryResponse> typeRefJE = new TypeReference<JournalEntryResponse>() {};
+            JournalEntryResponse cachedEntry = redisService.get("journalEntry:" + myId, typeRefJE);
+
+            if( cachedEntry != null ){
+
+                log.debug("Cache hit for entry ID '{}'.", myId);
+                return new ResponseEntity<>(cachedEntry, HttpStatus.OK);
+            }
+
+            TypeReference<List<JournalEntryResponse>> typeRefLJE = new TypeReference<List<JournalEntryResponse>>() {};
+            List<JournalEntryResponse> allEntriesCache = redisService.get("journalEntries:" + myUserName, typeRefLJE);
+
+            if( allEntriesCache != null ){
+
+                for( JournalEntryResponse entry : allEntriesCache ){
+
+                    if( myId.toString().equals(entry.getId()) ){
+                        log.debug("Cache hit for entry ID '{}'.", myId);
+                        return new ResponseEntity<>(entry, HttpStatus.OK);
+                    }
+                }
+            }
+
+            // in case of miss
+            log.debug("Cache miss for entry ID '{}'. Fetching from database...", myId);
+            log.info("Fetching journal entry with ID '{}' for user: '{}'", myId, myUserName);
+
+            JournalEntryResponse journalEntryResponse = journalEntryService.getJournalEntryById(myId);
+
+            if( journalEntryResponse == null ){
                 log.info("No journal entry found with ID: {}", myId);
                 return new ResponseEntity<>("Journal Entry Not Found", HttpStatus.NOT_FOUND);
             }
 
-            else {
-                log.info("Successfully fetched journal entry with ID '{}' for user: '{}'", myId, myUserName);
-                return new ResponseEntity<>(journalEntryResponse, HttpStatus.OK);
+            // cache the individual entry
+            redisService.set("journalEntry:" + myId, journalEntryResponse, 60L);
+
+            // update the complete list cache if it exists
+
+            if( allEntriesCache != null ){
+
+                boolean exists = allEntriesCache.stream().anyMatch(e -> e.getId().equals(myId.toString()));
+
+                if( !exists ){
+                    allEntriesCache.add(journalEntryResponse);
+                    redisService.set("journalEntries:" + myUserName, allEntriesCache, 60L);
+                    log.info("Successfully updated the cache for '{}'s' journal entry with ID '{}'.", myUserName, myId);
+                }
             }
+
+            return new ResponseEntity<>(journalEntryResponse, HttpStatus.OK);
 
         } catch (IllegalArgumentException e) {
             log.error("Invalid ID format: '{}'", myId, e);

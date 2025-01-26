@@ -47,6 +47,7 @@ public class JournalMapper {
 
         JournalEntryResponse journalEntryResponse = new JournalEntryResponse();
 
+        journalEntryResponse.setId(journalEntry.getId().toString());
         journalEntryResponse.setTitle(journalEntry.getTitle());
         journalEntryResponse.setContent(journalEntry.getContent());
         journalEntryResponse.setIsCollaborative(journalEntry.getIsCollaborative());
